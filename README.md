@@ -64,10 +64,6 @@ Full benchmark suite: Docker build, native compilation, time-to-health measureme
 | JVM+Leyden | N/A            | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2ms  | 4.5ms  |
 | Native     | N/A            | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11ms | 4.45ms |
 
-### Native build
-
-GraalVM Native Image compilation in **~1m 34s** producing a 134 MB binary (code + heap image).
-
 ## Run Benchmarks
 
 ```bash
