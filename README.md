@@ -61,8 +61,8 @@ Full benchmark suite: Docker build, native compilation, time-to-health measureme
 
 | Mode       | Spring Startup | Time-to-Health | Memory (idle) | Δ Memory (under k6) | P95    | P95    |
 |------------|----------------|----------------|--------------:|--------------------:|--------|--------|
-| JVM+Leyden | N/A            | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2ms  | 4.5ms  |
-| Native     | N/A            | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11ms | 4.45ms |
+| JVM+Leyden | 353 ms         | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2ms  | 4.5ms  |
+| Native     | 19 ms          | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11ms | 4.45ms |
 
 ## Run Benchmarks
 

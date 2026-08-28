@@ -44,15 +44,17 @@ wait_for_health() {
 }
 
 parse_spring_startup() {
-  # Parse Spring startup time from docker logs (now uses docker logs instead of log file)
   local logs
   logs=$(docker logs springlean-app 2>&1 || true)
+
   local result
-  result=$(echo "$logs" | grep "Started Application in" 2>/dev/null | sed -E 's/.*Started Application in ([0-9.]+s).*/\1/' | head -1)
+  # Extract milliseconds from "Started Application in Xs" or "initialization completed in X ms"
+  result=$(echo "$logs" | grep -oE "(Started Application|initialization completed) in [0-9.]+" 2>/dev/null | grep -oE "[0-9.]+" | head -1)
+
   if [ -z "$result" ]; then
     echo "N/A"
   else
-    echo "$result"
+    echo "${result}ms"
   fi
 }
 
@@ -189,9 +191,10 @@ else
   echo "Running container with memory limit 512m..."
   docker rm -f springlean-app 2>/dev/null || true
   START=$(date +%s%N)
-  docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e SPRING_DATASOURCE_URL=jdbc:postgresql://springlean-pg:5432/springlean --name springlean-app spring-lean:native ./spring-boot-lean -Xmx768m -XX:MaxGCPauseMillis=80 -XX:InitiatingHeapOccupancyPercent=35 > /dev/null
+docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e SPRING_DATASOURCE_URL=jdbc:postgresql://springlean-pg:5432/springlean --name springlean-app spring-lean:native ./spring-boot-lean -Xmx768m -XX:MaxGCPauseMillis=80 -XX:InitiatingHeapOccupancyPercent=35 > /dev/null
+sleep 0.5
 
-  if ! wait_for_health; then
+if ! wait_for_health; then
     echo "Native failed to start. Logs:"
     docker logs springlean-app 2>&1 | tail -20 || true
     docker rm -f springlean-app > /dev/null 2>&1 || true
