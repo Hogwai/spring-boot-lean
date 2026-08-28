@@ -1,0 +1,30 @@
+FROM maven:3.9-eclipse-temurin-25-alpine AS builder
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline -q
+COPY src ./src
+RUN mvn package -DskipTests -q
+RUN java -Djarmode=tools -jar target/*.jar extract --destination target/extracted
+RUN cp target/extracted/spring-boot-lean*.jar target/extracted/app.jar 2>/dev/null || cp target/*.jar target/extracted/app.jar 2>/dev/null || true
+
+FROM eclipse-temurin:25-jre-alpine AS aot
+WORKDIR /app
+COPY --from=builder /app/target/extracted ./extracted
+RUN cd extracted && \
+    java -XX:AOTCacheOutput=app.aot -Dspring.context.exit=onRefresh \
+    -XX:+UseCompactObjectHeaders -XX:+UseStringDeduplication \
+    -XX:MaxRAMPercentage=75.0 \
+    -jar app.jar || true
+
+FROM eclipse-temurin:25-jre-alpine
+WORKDIR /app
+COPY --from=aot /app/extracted/app.jar ./app.jar
+COPY --from=aot /app/extracted/lib ./lib
+COPY --from=aot /app/extracted/app.aot ./app.aot
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:AOTCache=app.aot", \
+    "-XX:+UseCompactObjectHeaders", "-XX:+UseStringDeduplication", \
+    "-XX:MaxRAMPercentage=75.0", "-XX:InitialRAMPercentage=75.0", \
+    "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100", "-XX:G1HeapRegionSize=2m", \
+    "-XX:ParallelGCThreads=2", "-XX:ConcGCThreads=1", "-XX:InitiatingHeapOccupancyPercent=30", \
+    "-jar", "app.jar"]

@@ -1,0 +1,9 @@
+FROM debian:12-slim
+WORKDIR /app
+COPY target/spring-boot-lean ./spring-boot-lean
+EXPOSE 8080
+RUN groupadd --system nonroot \
+    && useradd --system --gid nonroot --create-home nonroot
+
+USER nonroot
+ENTRYPOINT ["./spring-boot-lean"]

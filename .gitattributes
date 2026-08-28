@@ -1,0 +1,8 @@
+* text eol=lf
+
+*.java diff=java
+
+*.aot binary
+
+build/native-image/ binary
+build/build-info.properties text eol=crlf

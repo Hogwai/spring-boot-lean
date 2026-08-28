@@ -1,0 +1,26 @@
+# Eclipse / IntelliJ IDEA / other IDEs
+.idea/
+.classpath
+.project
+.settings/
+*.iml
+*.ipr
+*.iws
+
+# Build artifacts
+target/
+out/
+build/
+
+# Maven local repo cache (optional, keep if you want clean builds)
+# .m2/repository/
+
+# Gradle
+.gradle/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker build cache (optional)
+# .dockerenv
