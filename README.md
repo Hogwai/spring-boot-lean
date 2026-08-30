@@ -1,6 +1,6 @@
 # Spring Boot Lean
 
-An ultra-lean Spring Boot application optimized for fast startup and low memory footprint.
+An ultra-lean Spring Boot application optimized for fast startup and low memory footprint (kinda).
 
 Two modes:
 - AOT compilation (Project Leyden) 
@@ -63,6 +63,8 @@ Full benchmark suite: Docker build, native compilation, time-to-health measureme
 |------------|----------------|----------------|--------------:|--------------------:|--------|--------|
 | JVM+Leyden | 353 ms         | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2ms  | 4.5ms  |
 | Native     | 19 ms          | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11ms | 4.45ms |
+
+Not bad huh ?
 
 ## Run Benchmarks
 
