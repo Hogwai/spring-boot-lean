@@ -54,9 +54,9 @@ make run-go            # Go server (go run)
 
 #### Docker Build
 ```bash
-make build-docker-jvm    # → spring-lean:jvm
-make build-docker-native # → spring-lean:native
-make build-docker-go     # → spring-lean:go
+make build-docker-jvm    # spring-lean:jvm
+make build-docker-native # spring-lean:native
+make build-docker-go     # spring-lean:go
 ```
 
 #### Benchmarks
