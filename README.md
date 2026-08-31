@@ -87,10 +87,10 @@ Full benchmark suite: Docker build, time-to-health measurement, memory endurance
 
 ### Results
 
-| Mode       | Spring Startup | Time-to-Health | Memory (idle) | Δ Memory (under k6) | P90     | P95     |
-|------------|----------------|----------------|--------------:|--------------------:|---------|---------|
-| JVM+Leyden | 353 ms         | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2 ms  | 4.5 ms  |
-| Native     | 19 ms          | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11 ms | 4.45 ms |
-| Go         | 7 ms           | 288 ms         |     11.41 MiB |     31.55 MiB (+20) | 3.14 ms | 6.25 ms |
+| Mode                     | Startup time | Time-to-Health | Memory (idle) | Δ Memory (under k6) | P90     | P95     |
+|--------------------------|--------------|----------------|--------------:|--------------------:|---------|---------|
+| Spring Boot (JVM+Leyden) | 353 ms       | 1456 ms        |       207 MiB |      618 MiB (+411) | 3.2 ms  | 4.5 ms  |
+| Spring Boot (Native)     | 19 ms        | 803 ms         |      38.7 MiB |      89.7 MiB (+51) | 3.11 ms | 4.45 ms |
+| Gin (Go)                 | 7 ms         | 288 ms         |     11.41 MiB |     31.55 MiB (+20) | 3.14 ms | 6.25 ms |
 
 Not too bad for a slow and bloated framework, huh ?
