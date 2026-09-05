@@ -17,6 +17,7 @@ async fn main() {
 
     let pool = PgPoolOptions::new()
         .max_connections(20)
+        .min_connections(10)
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy(&cfg.database_url)
         .expect("invalid DATABASE_URL");

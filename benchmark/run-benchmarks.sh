@@ -100,6 +100,20 @@ wait_for_health() {
   done
 }
 
+warmup() {
+  echo "=== Warmup (30s, hors mesure) ==="
+  local end=$(( $(date +%s) + 30 ))
+  local i=0
+  while [ "$(date +%s)" -lt "$end" ]; do
+    case $((i % 2)) in
+      0) curl -s -o /dev/null "http://localhost:8080/api/transactions?accountNumber=ACC-1&limit=20" || true ;;
+      1) curl -s -o /dev/null "http://localhost:8080/api/transactions/1" || true ;;
+    esac
+    i=$((i + 1))
+    sleep 0.1 || true
+  done || true
+}
+
 parse_spring_startup() {
   local logs
   logs=$(docker logs springlean-app 2>&1 || true)
@@ -177,19 +191,73 @@ measure_memory_mb() {
 calc_delta() {
   local before="$1" after="$2"
   local b_num a_num
-  b_num=$(echo "$before" | grep -oE '[0-9]+' | head -1)
-  a_num=$(echo "$after" | grep -oE '[0-9]+' | head -1)
+  b_num=$(echo "$before" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
+  a_num=$(echo "$after" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
   if [ -z "$b_num" ] || [ -z "$a_num" ]; then
-    echo "N/A"
+    echo "n/a"
   else
-    echo "$((a_num - b_num)) MB"
+    awk "BEGIN {printf \"%.1fMiB\", $a_num - $b_num}" 2>/dev/null || echo "n/a"
   fi
 }
 
+parse_k6_p() {
+  local file="$1"
+  local pct="$2"
+  if [ ! -f "$file" ]; then
+    echo "n/a"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$pct" <<'PY' 2>/dev/null || echo "n/a"
+import json, sys
+f = sys.argv[1]
+pct = sys.argv[2]
+key = f"p({pct})"
+try:
+    data = json.load(open(f))
+    m = data.get("metrics", {}).get("http_req_duration", {})
+    v = m.get(key)
+    if v is None:
+        v = m.get("percentiles", {}).get(key)
+    if v is None:
+        v = m.get("values", {}).get(key)
+    if v is None:
+        # fallback scan any dict level
+        for k in (m, data.get("metrics", {})):
+            if isinstance(k, dict) and key in k:
+                v = k[key]
+                break
+    if v is None or v == "":
+        print("n/a")
+    else:
+        try:
+            print(f"{float(v):.2f}ms")
+        except:
+            print(f"{v}")
+except Exception:
+    print("n/a")
+PY
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    local val
+    val=$(jq -r ".metrics.http_req_duration[\"p($pct)\"] // .metrics.http_req_duration.percentiles[\"p($pct)\"] // .metrics.http_req_duration.values[\"p($pct)\"] // empty" "$file" 2>/dev/null || true)
+    if [ -n "$val" ] && [ "$val" != "null" ]; then
+      printf "%.2fms" "$val" 2>/dev/null || echo "${val}ms"
+    else
+      echo "n/a"
+    fi
+    return 0
+  fi
+  echo "n/a"
+}
+
 run_k6() {
+  local mode="${1:-default}"
+  local summary="/tmp/k6-${mode}.json"
   if command -v k6 &> /dev/null; then
     echo "Running bench 60s 200VUs..."
-    k6 run benchmark/load-test.js || echo "k6 failed (continuing)"
+    k6 run --summary-export="$summary" benchmark/load-test.js || echo "k6 failed (continuing)"
   else
     echo "k6 not found, skipping load test"
   fi
@@ -243,7 +311,12 @@ JVM_HEALTH_MS=$(( (HEALTH_END - START) / 1000000 ))
 JVM_SPRING=$(parse_spring_startup)
 JVM_MEM_BEFORE=$(measure_memory)
 echo "Spring startup: ${JVM_SPRING} | Time-to-health: ${JVM_HEALTH_MS}ms | Memory: ${JVM_MEM_BEFORE}"
-run_k6 || true
+warmup
+run_k6 jvm || true
+JVM_P90=$(parse_k6_p "/tmp/k6-jvm.json" "90" 2>/dev/null || echo "n/a") || true
+JVM_P95=$(parse_k6_p "/tmp/k6-jvm.json" "95" 2>/dev/null || echo "n/a") || true
+[ -z "$JVM_P90" ] && JVM_P90="n/a" || true
+[ -z "$JVM_P95" ] && JVM_P95="n/a" || true
 JVM_MEM_AFTER=$(measure_memory)
 JVM_MEM_DELTA=$(calc_delta "$JVM_MEM_BEFORE" "$JVM_MEM_AFTER")
 echo "Memory before: $JVM_MEM_BEFORE | after: $JVM_MEM_AFTER | delta: $JVM_MEM_DELTA"
@@ -290,7 +363,12 @@ if ! wait_for_health; then
     NATIVE_SPRING=$(parse_spring_startup)
     NATIVE_MEM_BEFORE=$(measure_memory)
     echo "Spring startup: ${NATIVE_SPRING} | Time-to-health: ${NATIVE_HEALTH_MS}ms | Memory: ${NATIVE_MEM_BEFORE}"
-    run_k6 || true
+    warmup
+    run_k6 native || true
+    NATIVE_P90=$(parse_k6_p "/tmp/k6-native.json" "90" 2>/dev/null || echo "n/a") || true
+    NATIVE_P95=$(parse_k6_p "/tmp/k6-native.json" "95" 2>/dev/null || echo "n/a") || true
+    [ -z "$NATIVE_P90" ] && NATIVE_P90="n/a" || true
+    [ -z "$NATIVE_P95" ] && NATIVE_P95="n/a" || true
     NATIVE_MEM_AFTER=$(measure_memory)
     NATIVE_MEM_DELTA=$(calc_delta "$NATIVE_MEM_BEFORE" "$NATIVE_MEM_AFTER")
     echo "Memory before: $NATIVE_MEM_BEFORE | after: $NATIVE_MEM_AFTER | delta: $NATIVE_MEM_DELTA"
@@ -328,7 +406,12 @@ else
     GO_STARTUP=$(parse_go_startup)
     GO_MEM_BEFORE=$(measure_memory)
     echo "Go startup: ${GO_STARTUP} | Time-to-health: ${GO_HEALTH_MS}ms | Memory: ${GO_MEM_BEFORE}"
-    run_k6 || true
+    warmup
+    run_k6 go || true
+    GO_P90=$(parse_k6_p "/tmp/k6-go.json" "90" 2>/dev/null || echo "n/a") || true
+    GO_P95=$(parse_k6_p "/tmp/k6-go.json" "95" 2>/dev/null || echo "n/a") || true
+    [ -z "$GO_P90" ] && GO_P90="n/a" || true
+    [ -z "$GO_P95" ] && GO_P95="n/a" || true
     GO_MEM_AFTER=$(measure_memory)
     GO_MEM_DELTA=$(calc_delta "$GO_MEM_BEFORE" "$GO_MEM_AFTER")
     echo "Memory before: $GO_MEM_BEFORE | after: $GO_MEM_AFTER | delta: $GO_MEM_DELTA"
@@ -366,7 +449,12 @@ else
     RUST_STARTUP=$(parse_rust_startup)
     RUST_MEM_BEFORE=$(measure_memory)
     echo "Rust startup: ${RUST_STARTUP} | Time-to-health: ${RUST_HEALTH_MS}ms | Memory: ${RUST_MEM_BEFORE}"
-    run_k6 || true
+    warmup
+    run_k6 rust || true
+    RUST_P90=$(parse_k6_p "/tmp/k6-rust.json" "90" 2>/dev/null || echo "n/a") || true
+    RUST_P95=$(parse_k6_p "/tmp/k6-rust.json" "95" 2>/dev/null || echo "n/a") || true
+    [ -z "$RUST_P90" ] && RUST_P90="n/a" || true
+    [ -z "$RUST_P95" ] && RUST_P95="n/a" || true
     RUST_MEM_AFTER=$(measure_memory)
     RUST_MEM_DELTA=$(calc_delta "$RUST_MEM_BEFORE" "$RUST_MEM_AFTER")
     echo "Memory before: $RUST_MEM_BEFORE | after: $RUST_MEM_AFTER | delta: $RUST_MEM_DELTA"
@@ -384,12 +472,24 @@ fi
 # ============================================================
 echo ""
 echo "=== Summary ==="
-printf "%-13s | %-18s | %-14s | %s\n" "Mode" "Spring Startup" "Time-to-Health" "Memory"
-printf "%-13s | %-18s | %-14s | %s\n" "---" "---" "---" "---"
-printf "%-13s | %-18s | %-14s | %s\n" "JVM+Leyden" "${JVM_SPRING:-N/A}" "${JVM_HEALTH_MS:-N/A}ms" "${JVM_MEM:-N/A}"
-printf "%-13s | %-18s | %-14s | %s\n" "Native" "${NATIVE_SPRING:-N/A}" "${NATIVE_HEALTH_MS:-N/A}ms" "${NATIVE_MEM:-N/A}"
-printf "%-13s | %-18s | %-14s | %s\n" "Go" "${GO_STARTUP:-N/A}" "${GO_HEALTH_MS:-N/A}ms" "${GO_MEM:-N/A}"
-printf "%-13s | %-18s | %-14s | %s\n" "Rust" "${RUST_STARTUP:-N/A}" "${RUST_HEALTH_MS:-N/A}ms" "${RUST_MEM:-N/A}"
+fmt_ms() {
+  if [ -n "${1:-}" ]; then echo "${1}ms"; else echo "n/a"; fi
+}
+fmt_mem_k6() {
+  if [ -z "${1:-}" ] || [ -z "${2:-}" ]; then echo "n/a"; return 0; fi
+  local a b d
+  a=$(echo "$1" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
+  b=$(echo "$2" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
+  if [ -z "$a" ] || [ -z "$b" ]; then echo "n/a"; return 0; fi
+  d=$(awk "BEGIN {printf \"%.0f\", $a - $b}" 2>/dev/null || echo "?")
+  echo "$1 (+${d})"
+}
+printf "| %-22s | %-12s | %-14s | %-13s | %-19s | %-7s | %-7s |\n" "Mode" "Startup time" "Time-to-Health" "Memory (idle)" "Δ Memory (under k6)" "P90" "P95"
+printf "|%-24s|%-14s|%-16s|%-15s|%-21s|%-9s|%-9s|\n" "------------------------" "--------------" "----------------" "---------------" "---------------------" "---------" "---------"
+printf "| %-22s | %-12s | %-14s | %-13s | %-19s | %-7s | %-7s |\n" "Spring Boot (JVM+Leyden)" "${JVM_SPRING:-n/a}" "$(fmt_ms "${JVM_HEALTH_MS:-}")" "${JVM_MEM_BEFORE:-n/a}" "$(fmt_mem_k6 "${JVM_MEM_AFTER:-}" "${JVM_MEM_BEFORE:-}")" "${JVM_P90:-n/a}" "${JVM_P95:-n/a}"
+printf "| %-22s | %-12s | %-14s | %-13s | %-19s | %-7s | %-7s |\n" "Spring Boot (Native)" "${NATIVE_SPRING:-n/a}" "$(fmt_ms "${NATIVE_HEALTH_MS:-}")" "${NATIVE_MEM_BEFORE:-n/a}" "$(fmt_mem_k6 "${NATIVE_MEM_AFTER:-}" "${NATIVE_MEM_BEFORE:-}")" "${NATIVE_P90:-n/a}" "${NATIVE_P95:-n/a}"
+printf "| %-22s | %-12s | %-14s | %-13s | %-19s | %-7s | %-7s |\n" "Gin (Go)" "${GO_STARTUP:-n/a}" "$(fmt_ms "${GO_HEALTH_MS:-}")" "${GO_MEM_BEFORE:-n/a}" "$(fmt_mem_k6 "${GO_MEM_AFTER:-}" "${GO_MEM_BEFORE:-}")" "${GO_P90:-n/a}" "${GO_P95:-n/a}"
+printf "| %-22s | %-12s | %-14s | %-13s | %-19s | %-7s | %-7s |\n" "Axum (Rust)" "${RUST_STARTUP:-n/a}" "$(fmt_ms "${RUST_HEALTH_MS:-}")" "${RUST_MEM_BEFORE:-n/a}" "$(fmt_mem_k6 "${RUST_MEM_AFTER:-}" "${RUST_MEM_BEFORE:-}")" "${RUST_P90:-n/a}" "${RUST_P95:-n/a}"
 
 # Endurance summary
 BENCH_END=$(date +%s)
