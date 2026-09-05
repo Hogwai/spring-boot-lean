@@ -15,29 +15,30 @@ cd "$PROJECT_DIR"
 
 # Help flag
 if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then
-  echo "Usage: $0 [jvm|native|go|all|jvm,go,...]"
-  echo "  (no arg) or all : run jvm native go"
+  echo "Usage: $0 [jvm|native|go|rust|all|jvm,go,...]"
+  echo "  (no arg) or all : run jvm native go rust"
   echo "  jvm             : JVM+Leyden only"
   echo "  native          : Native only"
   echo "  go              : Go only"
+  echo "  rust            : Rust only"
   echo "  Comma or space separated list, e.g. jvm,go or \"jvm native\""
   exit 0
 fi
 
 if [ $# -eq 0 ]; then
-  MODES="jvm native go"
+  MODES="jvm native go rust"
 else
   # Join all args, replace commas with spaces to support both "jvm,go" and "jvm go" / "jvm native go"
   RAW_INPUT="$*"
   RAW_INPUT=$(echo "$RAW_INPUT" | tr ',' ' ')
   # If "all" appears anywhere, expand to full set
   if echo "$RAW_INPUT" | grep -qw "all"; then
-    MODES="jvm native go"
+    MODES="jvm native go rust"
   else
     MODES=""
     for token in $RAW_INPUT; do
       case "$token" in
-        jvm|native|go)
+        jvm|native|go|rust)
           # avoid duplicates
           if ! echo "$MODES" | grep -qw "$token"; then
             MODES="$MODES $token"
@@ -46,7 +47,7 @@ else
         "")
           ;;
         *)
-          echo "Usage: $0 [jvm|native|go|all|jvm,go,...]"
+          echo "Usage: $0 [jvm|native|go|rust|all|jvm,go,...]"
           echo "Unknown mode: $token"
           exit 1
           ;;
@@ -54,7 +55,7 @@ else
     done
     MODES=$(echo "$MODES" | xargs)
     if [ -z "$MODES" ]; then
-      echo "Usage: $0 [jvm|native|go|all|jvm,go,...]"
+      echo "Usage: $0 [jvm|native|go|rust|all|jvm,go,...]"
       exit 1
     fi
   fi
@@ -119,6 +120,19 @@ parse_go_startup() {
   logs=$(docker logs springlean-app 2>&1 || true)
   local result
   # Go now logs "started in Xms"
+  result=$(echo "$logs" | grep -oE "started in [0-9]+ms" | grep -oE "[0-9]+ms" | head -1)
+  if [ -n "$result" ]; then
+    echo "$result"
+    return
+  fi
+  echo "N/A"
+}
+
+parse_rust_startup() {
+  local logs
+  logs=$(docker logs springlean-app 2>&1 || true)
+  local result
+  # Rust logs "started in Xms"
   result=$(echo "$logs" | grep -oE "started in [0-9]+ms" | grep -oE "[0-9]+ms" | head -1)
   if [ -n "$result" ]; then
     echo "$result"
@@ -328,6 +342,44 @@ fi
 fi
 
 # ============================================================
+# Rust Mode
+# ============================================================
+if echo "$MODES" | grep -qw "rust"; then
+echo "=== Rust Mode ==="
+echo "Building Docker image spring-lean:rust..."
+if ! docker build -f rust/Dockerfile -t spring-lean:rust ./rust 2>&1; then
+  echo "Rust build FAILED. Skipping Rust benchmark."
+  echo ""
+else
+  echo "Running container with memory limit 1g..."
+  docker rm -f springlean-app 2>/dev/null || true
+  START=$(date +%s%N)
+  docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e DATABASE_URL=postgres://springlean:springlean@springlean-pg:5432/springlean?sslmode=disable --name springlean-app spring-lean:rust > /dev/null
+
+  if ! wait_for_health; then
+    echo "Rust failed to start. Logs:"
+    docker logs springlean-app 2>&1 | tail -20 || true
+    docker rm -f springlean-app > /dev/null 2>&1 || true
+  else
+    HEALTH_END=$(date +%s%N)
+    RUST_HEALTH_MS=$(( (HEALTH_END - START) / 1000000 ))
+    RUST_STARTUP=$(parse_rust_startup)
+    RUST_MEM_BEFORE=$(measure_memory)
+    echo "Rust startup: ${RUST_STARTUP} | Time-to-health: ${RUST_HEALTH_MS}ms | Memory: ${RUST_MEM_BEFORE}"
+    run_k6 || true
+    RUST_MEM_AFTER=$(measure_memory)
+    RUST_MEM_DELTA=$(calc_delta "$RUST_MEM_BEFORE" "$RUST_MEM_AFTER")
+    echo "Memory before: $RUST_MEM_BEFORE | after: $RUST_MEM_AFTER | delta: $RUST_MEM_DELTA"
+    RUST_MEM="$RUST_MEM_AFTER"
+    echo "Docker stats: $(docker stats --no-stream --format "{{.MemUsage}} ({{.MemPerc}})" springlean-app 2>/dev/null || echo "N/A")"
+    docker rm -f springlean-app > /dev/null 2>&1 || true
+  fi
+  echo "Rust complete."
+  echo ""
+fi
+fi
+
+# ============================================================
 # Summary
 # ============================================================
 echo ""
@@ -337,6 +389,7 @@ printf "%-13s | %-18s | %-14s | %s\n" "---" "---" "---" "---"
 printf "%-13s | %-18s | %-14s | %s\n" "JVM+Leyden" "${JVM_SPRING:-N/A}" "${JVM_HEALTH_MS:-N/A}ms" "${JVM_MEM:-N/A}"
 printf "%-13s | %-18s | %-14s | %s\n" "Native" "${NATIVE_SPRING:-N/A}" "${NATIVE_HEALTH_MS:-N/A}ms" "${NATIVE_MEM:-N/A}"
 printf "%-13s | %-18s | %-14s | %s\n" "Go" "${GO_STARTUP:-N/A}" "${GO_HEALTH_MS:-N/A}ms" "${GO_MEM:-N/A}"
+printf "%-13s | %-18s | %-14s | %s\n" "Rust" "${RUST_STARTUP:-N/A}" "${RUST_HEALTH_MS:-N/A}ms" "${RUST_MEM:-N/A}"
 
 # Endurance summary
 BENCH_END=$(date +%s)
@@ -353,6 +406,7 @@ echo "Memory endurance (RSS before -> after k6):"
 echo "  JVM+Leyden: ${JVM_MEM_BEFORE:-N/A} -> ${JVM_MEM_AFTER:-N/A} (delta: ${JVM_MEM_DELTA:-N/A})"
 echo "  Native    : ${NATIVE_MEM_BEFORE:-N/A} -> ${NATIVE_MEM_AFTER:-N/A} (delta: ${NATIVE_MEM_DELTA:-N/A})"
 echo "  Go        : ${GO_MEM_BEFORE:-N/A} -> ${GO_MEM_AFTER:-N/A} (delta: ${GO_MEM_DELTA:-N/A})"
+echo "  Rust      : ${RUST_MEM_BEFORE:-N/A} -> ${RUST_MEM_AFTER:-N/A} (delta: ${RUST_MEM_DELTA:-N/A})"
 echo "Note: PGO endurance isn't tested (just G1 GC for native)."
 
 trap - EXIT

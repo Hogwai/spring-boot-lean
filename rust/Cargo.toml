@@ -1,0 +1,17 @@
+[package]
+name = "spring-boot-lean"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+
+[dependencies]
+axum = { version = "=0.8.8", features = ["macros", "tracing"] }
+tokio = { version = "=1.49.0", features = ["full"] }
+sqlx = { version = "=0.8.6", features = ["runtime-tokio", "tls-rustls", "postgres", "rust_decimal", "json", "chrono", "migrate", "macros"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+rust_decimal = { version = "=1.40.0", features = ["serde-with-str", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+tower-http = { version = "0.6.5", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
