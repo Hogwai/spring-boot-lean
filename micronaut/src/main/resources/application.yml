@@ -1,0 +1,39 @@
+micronaut:
+  application:
+    name: micronaut-lean
+  server:
+    port: 8080
+    host: 0.0.0.0
+    netty:
+      parent:
+        loom-carrier: false
+  executors:
+    io:
+      type: fixed
+      virtual: false
+  # Virtual threads (micronaut.executors.*.virtual and loom-carrier) disabled by default to keep startup safe if unstable
+
+datasources:
+  default:
+    url: jdbc:postgresql://localhost:5432/springlean
+    username: springlean
+    password: springlean
+    driver-class-name: org.postgresql.Driver
+    maximum-pool-size: 20
+    minimum-idle: 10
+    connection-timeout: 2000
+    dialect: POSTGRES
+
+endpoints:
+  health:
+    enabled: true
+    sensitive: false
+    details-visible: ANONYMOUS
+
+jackson:
+  deserialization:
+    useBigDecimalForFloats: true
+
+logger:
+  levels:
+    root: INFO
