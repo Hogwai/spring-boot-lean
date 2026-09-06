@@ -102,7 +102,7 @@ wait_for_health() {
 }
 
 warmup() {
-  echo "=== Warmup (30s, hors mesure) ==="
+  echo "=== Warmup (30s) ==="
   local end=$(( $(date +%s) + 30 ))
   local i=0
   while [ "$(date +%s)" -lt "$end" ]; do

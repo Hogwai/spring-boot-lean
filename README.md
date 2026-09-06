@@ -109,7 +109,7 @@ make clean              # remove build artifacts + Docker images
 ## Benchmarks
 
 Full benchmark suite: Docker build, time-to-health measurement, memory endurance under k6 load (200 VUs, 60s). 
-All modes are warmed up for 30s (warmup hors mesure) before k6.
+All modes are warmed up for 30s before k6.
 
 ### Results
 
