@@ -2,23 +2,24 @@
 
 An ultra-lean Spring Boot application optimized for fast startup and low memory footprint (kinda).
 
-Five modes:
+Six modes:
 - JVM+Leyden (AOT compilation)
 - Native compilation with GraalVM
+- CRaC (Azul Zulu + Warp Engine, checkpoint/restore)
 - Go (Gin 1.9.1 + pgx)
 - Rust (Axum 0.8.8 + sqlx)
 - Micronaut (Micronaut 5 + Netty + HikariCP)
 
 ## Tech Stack
 
-|           | Java (Spring Boot)             | Micronaut (Netty)       | Go             | Rust             |
-|-----------|--------------------------------|-------------------------|----------------|------------------|
-| Runtime   | Java 25 (GraalVM 25.0.3+9-LTS) | Java 25                 | Go 1.23        | Rust 1.93.1      |
-| Framework | Spring Boot 4.1.0              | Micronaut 5 (5.1.10)    | Gin 1.9.1      | Axum 0.8.8       |
-| Server    | Tomcat (virtual threads)       | Netty (port 8080)       | net/http       | Tokio + Axum     |
-| DB        | JDBC + HikariCP                | JDBC + HikariCP (20/10) | pgxpool        | sqlx 0.8.6       |
-| DB        | PostgreSQL 18                  | PostgreSQL 18           | PostgreSQL 18  | PostgreSQL 18    |
-| Image     | spring-lean:jvm / native       | spring-lean:micronaut   | spring-lean:go | spring-lean:rust |
+|           | Java (Spring Boot)             | CRaC (Azul Zulu)         | Micronaut (Netty)       | Go             | Rust             |
+|-----------|--------------------------------|--------------------------|-------------------------|----------------|------------------|
+| Runtime   | Java 25 (GraalVM 25.0.3+9-LTS) | Java 25 (Azul Zulu CRaC) | Java 25                 | Go 1.23        | Rust 1.93.1      |
+| Framework | Spring Boot 4.1.0              | Spring Boot 4.1.0        | Micronaut 5 (5.1.10)    | Gin 1.9.1      | Axum 0.8.8       |
+| Server    | Tomcat (virtual threads)       | Tomcat (Warp Engine)     | Netty (port 8080)       | net/http       | Tokio + Axum     |
+| DB        | JDBC + HikariCP                | JDBC + HikariCP          | JDBC + HikariCP (20/10) | pgxpool        | sqlx 0.8.6       |
+| DB        | PostgreSQL 18                  | PostgreSQL 18            | PostgreSQL 18           | PostgreSQL 18  | PostgreSQL 18    |
+| Image     | spring-lean:jvm / native       | spring-lean:crac         | spring-lean:micronaut   | spring-lean:go | spring-lean:rust |
 
 ## Architecture
 
@@ -29,6 +30,12 @@ REST CRUD API on financial transactions:
 - `JdbcTransactionRepository`: JdbcTemplate + HikariCP
 - `GlobalExceptionHandler`: structured JSON error responses
 - Actuator health (`/actuator/health`)
+
+**CRaC (Azul Zulu + Warp Engine)**
+- Spring Boot checkpointed via Azul Zulu CRaC (`-XX:CRaCCheckpointTo` / `-XX:CRaCRestoreFrom`)
+- Warp Engine
+- Dockerfile.crac: 3-stage build (builder -> checkpoint -> runtime with same JDK image)
+- Baked `SPRING_DATASOURCE_URL` at checkpoint (environment restored on restore)
 
 **Micronaut (micronaut/ module)**
 - `TransactionController` (Micronaut, Netty on port 8080): GET list, GET single, POST, PUT
@@ -51,7 +58,8 @@ REST CRUD API on financial transactions:
 ### Requirements
 - Docker
 - k6
-- Java: GraalVM CE + sdkman (JVM/Native/Micronaut modes, Java 25)
+- Java: GraalVM CE + sdkman (JVM/Native modes, Java 25)
+- Azul Zulu CRaC + sdkman (CRaC mode, Java 25)
 - Go 1.23+ (Go mode)
 - Rust 1.93.1+ (Rust mode)
 
@@ -81,9 +89,10 @@ make build-docker-micronaut  # -> spring-lean:micronaut
 
 #### Benchmarks
 ```bash
-make bench              # all modes (JVM + Native + Go + Rust + Micronaut)
+make bench              # all modes (JVM + Native + CRaC + Go + Rust + Micronaut)
 make bench-jvm          # JVM only
 make bench-native       # Native only
+make bench-crac         # CRaC only
 make bench-go           # Go only
 make bench-rust         # Rust only
 make bench-micronaut    # Micronaut only
@@ -91,14 +100,15 @@ make bench-micronaut    # Micronaut only
 
 Or directly:
 ```bash
-./benchmark/run-benchmarks.sh                 # all (jvm native go rust micronaut)
+./benchmark/run-benchmarks.sh                 # all (jvm native crac go rust micronaut)
 ./benchmark/run-benchmarks.sh jvm             # JVM only
+./benchmark/run-benchmarks.sh crac            # CRaC only
 ./benchmark/run-benchmarks.sh micronaut       # Micronaut only
 ./benchmark/run-benchmarks.sh go              # Go only
 ./benchmark/run-benchmarks.sh rust            # Rust only
 ./benchmark/run-benchmarks.sh jvm,micronaut   # JVM + Micronaut
 ./benchmark/run-benchmarks.sh jvm,go          # JVM + Go
-./benchmark/run-benchmarks.sh --help          # usage (all = jvm native go rust micronaut)
+./benchmark/run-benchmarks.sh --help          # usage (all = jvm native crac go rust micronaut)
 ```
 
 #### Cleanup
@@ -119,6 +129,7 @@ All modes are warmed up for 30s.
 |--------------------------|--------------|----------------|---------------|---------------|-------------------|--------|--------|
 | Spring Boot (JVM+Leyden) | 1232ms       | 1539ms         | 185.8MiB      | 208.7MiB      | 177.7MiB (-8)     | 2.69ms | 3.24ms |
 | Spring Boot (Native)     | 198ms        | 939ms          | 37.18MiB      | 92.2MiB       | 90.91MiB (+54)    | 2.93ms | 3.50ms |
+| Spring Boot (CRaC/Azul)  | 413ms        | 771ms          | 190MiB        | 390.4MiB      | 389.1MiB (+198)   | 2.57ms | 2.96ms |
 | Gin (Go)                 | 173ms        | 294ms          | 11.66MiB      | 34.84MiB      | 32.84MiB (+21)    | 2.52ms | 2.92ms |
 | Axum (Rust)              | 128ms        | 251ms          | 6.488MiB      | 18.5MiB       | 16.68MiB (+10)    | 2.74ms | 3.22ms |
 | Micronaut                | 794ms        | 1220ms         | 188.6MiB      | 248.5MiB      | 227.2MiB (+39)    | 2.42ms | 3.04ms |

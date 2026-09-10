@@ -19,9 +19,12 @@ RUN cd extracted && \
     -jar app.jar || true
 
 FROM eclipse-temurin:25-jre-alpine
+RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=aot /app/extracted/app.jar ./app.jar
 COPY --from=aot /app/extracted/lib ./lib
 COPY --from=aot /app/extracted/app.aot ./app.aot
+RUN chown -R app:app /app
+USER app
 EXPOSE 8080
 ENTRYPOINT ["java", "-XX:AOTCache=app.aot", "-XX:+UseG1GC", "-XX:MaxRAMPercentage=70.0", "-XX:MaxGCPauseMillis=200", "-XX:+UseCompactObjectHeaders", "-jar", "app.jar"]

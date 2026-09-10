@@ -15,31 +15,32 @@ cd "$PROJECT_DIR"
 
 # Help flag
 if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then
-  echo "Usage: $0 [jvm|native|go|rust|micronaut|all|jvm,go,...]"
-  echo "  (no arg) or all : run jvm native go rust micronaut"
+  echo "Usage: $0 [jvm|native|go|rust|micronaut|crac|all|jvm,go,...]"
+  echo "  (no arg) or all : run jvm native go rust micronaut crac"
   echo "  jvm             : JVM+Leyden only"
   echo "  native          : Native only"
   echo "  go              : Go only"
   echo "  rust            : Rust only"
   echo "  micronaut       : Micronaut only"
+  echo "  crac            : Spring Boot + CRaC only"
   echo "  Comma or space separated list, e.g. jvm,go or \"jvm native\""
   exit 0
 fi
 
 if [ $# -eq 0 ]; then
-  MODES="jvm native go rust micronaut"
+  MODES="jvm native go rust micronaut crac"
 else
   # Join all args, replace commas with spaces to support both "jvm,go" and "jvm go" / "jvm native go"
   RAW_INPUT="$*"
   RAW_INPUT=$(echo "$RAW_INPUT" | tr ',' ' ')
   # If "all" appears anywhere, expand to full set
   if echo "$RAW_INPUT" | grep -qw "all"; then
-    MODES="jvm native go rust micronaut"
+    MODES="jvm native go rust micronaut crac"
   else
     MODES=""
     for token in $RAW_INPUT; do
       case "$token" in
-        jvm|native|go|rust|micronaut)
+        jvm|native|go|rust|micronaut|crac)
           # avoid duplicates
           if ! echo "$MODES" | grep -qw "$token"; then
             MODES="$MODES $token"
@@ -48,7 +49,7 @@ else
         "")
           ;;
         *)
-          echo "Usage: $0 [jvm|native|go|rust|micronaut|all|jvm,go,...]"
+          echo "Usage: $0 [jvm|native|go|rust|micronaut|crac|all|jvm,go,...]"
           echo "Unknown mode: $token"
           exit 1
           ;;
@@ -56,7 +57,7 @@ else
     done
     MODES=$(echo "$MODES" | xargs)
     if [ -z "$MODES" ]; then
-      echo "Usage: $0 [jvm|native|go|rust|micronaut|all|jvm,go,...]"
+      echo "Usage: $0 [jvm|native|go|rust|micronaut|crac|all|jvm,go,...]"
       exit 1
     fi
   fi
@@ -415,7 +416,7 @@ echo "=== JVM+Leyden Mode ==="
 echo "Building Docker image spring-lean:jvm..."
 docker build -f Dockerfile.jvm -t spring-lean:jvm .
 
-echo "Running container with memory limit 512m..."
+echo "Running container with memory limit 1g..."
 docker rm -f springlean-app 2>/dev/null || true
 START=$(date +%s%N)
 docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e SPRING_DATASOURCE_URL=jdbc:postgresql://springlean-pg:5432/springlean --name springlean-app spring-lean:jvm > /dev/null
@@ -473,7 +474,7 @@ else
   NATIVE_BUILD_END=$(date +%s)
   NATIVE_BUILD_TIME="$((NATIVE_BUILD_END - NATIVE_BUILD_START))s"
   echo "Native build time: $NATIVE_BUILD_TIME"
-  echo "Running container with memory limit 512m..."
+  echo "Running container with memory limit 1g..."
   docker rm -f springlean-app 2>/dev/null || true
   START=$(date +%s%N)
 docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e SPRING_DATASOURCE_URL=jdbc:postgresql://springlean-pg:5432/springlean --name springlean-app spring-lean:native ./spring-boot-lean -Xmx768m -XX:MaxGCPauseMillis=80 -XX:InitiatingHeapOccupancyPercent=35 > /dev/null
@@ -657,6 +658,54 @@ fi
 fi
 
 # ============================================================
+# CRaC Mode
+# ============================================================
+if echo "$MODES" | grep -qw "crac"; then
+echo "=== CRaC Mode ==="
+echo "Building Docker image spring-lean:crac..."
+if ! docker build -f Dockerfile.crac -t spring-lean:crac . 2>&1; then
+  echo "CRaC build FAILED. Skipping CRaC benchmark."
+  echo ""
+else
+  echo "Running container with memory limit 1g..."
+  docker rm -f springlean-app 2>/dev/null || true
+  START=$(date +%s%N)
+  docker run -d --memory=1g --memory-swap=1g -p 8080:8080 --network springlean-net -e SPRING_DATASOURCE_URL=jdbc:postgresql://springlean-pg:5432/springlean --name springlean-app spring-lean:crac > /dev/null
+
+  if ! wait_for_health; then
+    echo "CRaC failed to start. Logs:"
+    docker logs springlean-app 2>&1 | tail -20 || true
+    docker rm -f springlean-app > /dev/null 2>&1 || true
+  else
+    HEALTH_END=$(date +%s%N)
+    CRAC_HEALTH_MS=$(( (HEALTH_END - START) / 1000000 ))
+    CRAC_STARTUP=$(container_startup_ms springlean-app "Total startup in [0-9]+ms" || true)
+    if [ "$CRAC_STARTUP" = "n/a" ] || [ -z "$CRAC_STARTUP" ]; then CRAC_STARTUP=$(parse_spring_startup || true); fi || true
+    CRAC_MEM_BEFORE=$(measure_memory)
+    echo "Spring startup: ${CRAC_STARTUP} | Time-to-health: ${CRAC_HEALTH_MS}ms | Memory: ${CRAC_MEM_BEFORE}"
+    warmup
+  # peak covers k6 only (not warmup)
+  sample_peak_mem /tmp/peak-crac.txt & PEAK_PID=$! || true
+    run_k6 crac || true
+  kill $PEAK_PID 2>/dev/null || true; wait $PEAK_PID 2>/dev/null || true
+  CRAC_PEAK=$(cat /tmp/peak-crac.txt 2>/dev/null || echo "n/a"); if [ -z "$CRAC_PEAK" ] || [ "$CRAC_PEAK" = "0.0MiB" ]; then CRAC_PEAK="n/a"; fi || true
+    CRAC_P90=$(parse_k6_p "/tmp/k6-crac.json" "90" 2>/dev/null || echo "n/a") || true
+    CRAC_P95=$(parse_k6_p "/tmp/k6-crac.json" "95" 2>/dev/null || echo "n/a") || true
+    [ -z "$CRAC_P90" ] && CRAC_P90="n/a" || true
+    [ -z "$CRAC_P95" ] && CRAC_P95="n/a" || true
+    CRAC_MEM_AFTER=$(measure_memory)
+    CRAC_MEM_DELTA=$(calc_delta "$CRAC_MEM_BEFORE" "$CRAC_MEM_AFTER")
+    echo "Memory before: $CRAC_MEM_BEFORE | after: $CRAC_MEM_AFTER | delta: $CRAC_MEM_DELTA"
+    CRAC_MEM="$CRAC_MEM_AFTER"
+    echo "Docker stats: $(docker stats --no-stream --format "{{.MemUsage}} ({{.MemPerc}})" springlean-app 2>/dev/null || echo "N/A")"
+    docker rm -f springlean-app > /dev/null 2>&1 || true
+  fi
+  echo "CRaC complete."
+  echo ""
+fi
+fi
+
+# ============================================================
 # Summary
 # ============================================================
 echo ""
@@ -680,6 +729,7 @@ printf "| %-22s | %-12s | %-14s | %-13s | %-13s | %-19s | %-7s | %-7s |\n" "Spri
 printf "| %-22s | %-12s | %-14s | %-13s | %-13s | %-19s | %-7s | %-7s |\n" "Gin (Go)" "${GO_STARTUP:-n/a}" "$(fmt_ms "${GO_HEALTH_MS:-}")" "${GO_MEM_BEFORE:-n/a}" "${GO_PEAK:-n/a}" "$(fmt_mem_k6 "${GO_MEM_AFTER:-}" "${GO_MEM_BEFORE:-}")" "${GO_P90:-n/a}" "${GO_P95:-n/a}"
 printf "| %-22s | %-12s | %-14s | %-13s | %-13s | %-19s | %-7s | %-7s |\n" "Axum (Rust)" "${RUST_STARTUP:-n/a}" "$(fmt_ms "${RUST_HEALTH_MS:-}")" "${RUST_MEM_BEFORE:-n/a}" "${RUST_PEAK:-n/a}" "$(fmt_mem_k6 "${RUST_MEM_AFTER:-}" "${RUST_MEM_BEFORE:-}")" "${RUST_P90:-n/a}" "${RUST_P95:-n/a}"
 printf "| %-22s | %-12s | %-14s | %-13s | %-13s | %-19s | %-7s | %-7s |\n" "Micronaut" "${MICRONAUT_STARTUP:-n/a}" "$(fmt_ms "${MICRONAUT_HEALTH_MS:-}")" "${MICRONAUT_MEM_BEFORE:-n/a}" "${MICRONAUT_PEAK:-n/a}" "$(fmt_mem_k6 "${MICRONAUT_MEM_AFTER:-}" "${MICRONAUT_MEM_BEFORE:-}")" "${MICRONAUT_P90:-n/a}" "${MICRONAUT_P95:-n/a}"
+printf "| %-22s | %-12s | %-14s | %-13s | %-13s | %-19s | %-7s | %-7s |\n" "Spring Boot (CRaC)" "${CRAC_STARTUP:-n/a}" "$(fmt_ms "${CRAC_HEALTH_MS:-}")" "${CRAC_MEM_BEFORE:-n/a}" "${CRAC_PEAK:-n/a}" "$(fmt_mem_k6 "${CRAC_MEM_AFTER:-}" "${CRAC_MEM_BEFORE:-}")" "${CRAC_P90:-n/a}" "${CRAC_P95:-n/a}"
 
 # Endurance summary
 BENCH_END=$(date +%s)
@@ -698,6 +748,7 @@ echo "  Native    : ${NATIVE_MEM_BEFORE:-N/A} -> ${NATIVE_PEAK:-N/A} (peak) -> $
 echo "  Go        : ${GO_MEM_BEFORE:-N/A} -> ${GO_PEAK:-N/A} (peak) -> ${GO_MEM_AFTER:-N/A} (delta: ${GO_MEM_DELTA:-N/A})"
 echo "  Rust      : ${RUST_MEM_BEFORE:-N/A} -> ${RUST_PEAK:-N/A} (peak) -> ${RUST_MEM_AFTER:-N/A} (delta: ${RUST_MEM_DELTA:-N/A})"
 echo "  Micronaut : ${MICRONAUT_MEM_BEFORE:-N/A} -> ${MICRONAUT_PEAK:-N/A} (peak) -> ${MICRONAUT_MEM_AFTER:-N/A} (delta: ${MICRONAUT_MEM_DELTA:-N/A})"
+echo "  CRaC      : ${CRAC_MEM_BEFORE:-N/A} -> ${CRAC_PEAK:-N/A} (peak) -> ${CRAC_MEM_AFTER:-N/A} (delta: ${CRAC_MEM_DELTA:-N/A})"
 echo "Note: PGO endurance isn't tested (just G1 GC for native)."
 
 trap - EXIT

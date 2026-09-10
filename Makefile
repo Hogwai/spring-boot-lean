@@ -1,4 +1,4 @@
-.PHONY: run-jvm run-native run-go run-rust run-micronaut build-docker-jvm build-docker-native build-docker-go build-docker-rust build-docker-micronaut bench bench-jvm bench-native bench-go bench-rust bench-micronaut bench-all clean help
+.PHONY: run-jvm run-native run-go run-rust run-micronaut build-docker-jvm build-docker-native build-docker-go build-docker-rust build-docker-micronaut bench bench-jvm bench-native bench-go bench-rust bench-micronaut bench-crac bench-all clean help
 
 # Local run
 run-jvm:
@@ -51,6 +51,9 @@ bench-rust:
 bench-micronaut:
 	./benchmark/run-benchmarks.sh micronaut
 
+bench-crac:
+	./benchmark/run-benchmarks.sh crac
+
 bench-all:
 	./benchmark/run-benchmarks.sh all
 
@@ -74,12 +77,13 @@ help:
 	@echo "  build-docker-go    - Build Go Docker image (spring-lean:go) with context ./go"
 	@echo "  build-docker-rust  - Build Rust Docker image (spring-lean:rust) with context ./rust"
 	@echo "  build-docker-micronaut - Build Micronaut Docker image (spring-lean:micronaut) with context ./micronaut"
-	@echo "  bench              - Run all benchmarks (jvm native go rust micronaut) [alias bench-all]"
+	@echo "  bench            - Run all benchmarks (jvm native go rust micronaut crac) [alias bench-all]"
 	@echo "  bench-jvm          - Run JVM benchmark only"
 	@echo "  bench-native       - Run Native benchmark only"
 	@echo "  bench-go           - Run Go benchmark only"
 	@echo "  bench-rust         - Run Rust benchmark only"
 	@echo "  bench-micronaut    - Run Micronaut benchmark only"
-	@echo "  bench-all          - Run all benchmarks (jvm native go rust micronaut)"
+	@echo "  bench-crac         - Run Spring Boot + CRaC benchmark only"
+	@echo "  bench-all          - Run all benchmarks (jvm native go rust micronaut crac)"
 	@echo "  clean              - Clean build artifacts and Docker images"
 	@echo "  help               - Show this help"
